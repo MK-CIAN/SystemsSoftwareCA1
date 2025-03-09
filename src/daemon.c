@@ -28,12 +28,12 @@
 #define DT_REG 8  // Value for regular files
 #endif
 
-/* Global variables */
+// Assigning Global variables
 volatile sig_atomic_t running = 1;
 volatile sig_atomic_t force_backup = 0;
 pthread_mutex_t dir_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-/* Signal handler for termination signals */
+// Signal handler for termination signals
 void handle_signal(int sig) {
     switch (sig) {
         case SIGTERM:
@@ -48,26 +48,28 @@ void handle_signal(int sig) {
     }
 }
 
-/* Check if daemon is already running */
 int check_daemon_running(const char *pid_file) {
     FILE *fp;
     pid_t pid;
     
-    if ((fp = fopen(pid_file, "r")) != NULL) {
-        if (fscanf(fp, "%d", &pid) == 1) {
-            fclose(fp);
-            if (kill(pid, 0) == 0) {
-                log_message(CLOG_WARNING, "Daemon already running with PID %d", pid);
-                return 1;
-            }
-        }
-        fclose(fp);
+    fp = fopen(pid_file, "r");
+    if (fp == NULL) {
+        return 0;  // File does not exist, so daemon is not running
     }
-    
+
+    int read_pid = fscanf(fp, "%d", &pid);
+    fclose(fp);  // Ensure `fclose(fp)` is always called exactly once since I had an issue with it being called twice
+
+    if (read_pid == 1 && kill(pid, 0) == 0) {
+        log_message(CLOG_WARNING, "Daemon already running with PID %d", pid);
+        return 1;
+    }
+
     return 0;
 }
 
-/* Write PID to file */
+
+// Write PID to file
 int write_pid_file(const char *pid_file) {
     FILE *fp;
     
@@ -82,7 +84,7 @@ int write_pid_file(const char *pid_file) {
     return 0;
 }
 
-/* Check uploaded XML reports and log changes */
+//Check uploaded XML reports and log the changes, this goes to a changes_log text file in uploads folder
 void check_uploads() {
     DIR *dir;
     struct dirent *entry;
@@ -138,7 +140,12 @@ void check_missing_reports() {
     time_t now = time(NULL);
     struct tm *time_info = localtime(&now);
     
-    strftime(today_date, sizeof(today_date), "%Y%m%d", time_info);
+    // Get yesterday's date
+    time_info->tm_mday -= 1;  // Moving back one day
+    mktime(time_info); 
+    char yesterday_date[20];
+    strftime(yesterday_date, sizeof(yesterday_date), "%Y%m%d", time_info);
+
     
     dir = opendir(UPLOAD_DIR);
     if (dir == NULL) {
@@ -148,20 +155,20 @@ void check_missing_reports() {
     
     while ((entry = readdir(dir)) != NULL) {
         if (entry->d_type == DT_REG && strstr(entry->d_name, ".xml") != NULL) {
-            if (strstr(entry->d_name, "warehouse") && strstr(entry->d_name, today_date))
+            if (strstr(entry->d_name, "warehouse") && strstr(entry->d_name, yesterday_date))
                 warehouse_found = 1;
-            else if (strstr(entry->d_name, "manufacturing") && strstr(entry->d_name, today_date))
+            else if (strstr(entry->d_name, "manufacturing") && strstr(entry->d_name, yesterday_date))
                 manufacturing_found = 1;
-            else if (strstr(entry->d_name, "sales") && strstr(entry->d_name, today_date))
+            else if (strstr(entry->d_name, "sales") && strstr(entry->d_name, yesterday_date))
                 sales_found = 1;
-            else if (strstr(entry->d_name, "distribution") && strstr(entry->d_name, today_date))
+            else if (strstr(entry->d_name, "distribution") && strstr(entry->d_name, yesterday_date))
                 distribution_found = 1;
         }
     }
     
     closedir(dir);
     
-    // Log missing reports
+    // Logging missing reports
     if (!warehouse_found)
         log_message(CLOG_WARNING, "Missing warehouse report for %s", today_date);
     if (!manufacturing_found)
@@ -172,53 +179,56 @@ void check_missing_reports() {
         log_message(CLOG_WARNING, "Missing distribution report for %s", today_date);
 }
 
-/* Lock directories before backup/transfer operations */
+/* Lock directories before backup/transfer */
 int lock_directories() {
+    // Restrict access to the upload directory (read-only for all)
+    if (chmod(UPLOAD_DIR, S_IRUSR | S_IRGRP | S_IROTH) != 0) {
+        log_message(CLOG_ERROR, "Failed to lock upload directory: %s", strerror(errno));
+        return -1;
+    }
+
+    // Restrict access to the dashboard directory (read-only for all)
+    if (chmod(REPORT_DIR, S_IRUSR | S_IRGRP | S_IROTH) != 0) {
+        log_message(CLOG_ERROR, "Failed to lock report directory: %s", strerror(errno));
+        return -1;
+    }
+
+    // Lock directory mutex
     int ret = pthread_mutex_lock(&dir_mutex);
     if (ret != 0) {
         log_message(CLOG_ERROR, "Failed to lock directories: %s", strerror(ret));
         return -1;
     }
-    
-    // Change permissions to read-only
-    if (chmod(UPLOAD_DIR, S_IRUSR | S_IRGRP | S_IROTH) != 0) {
-        log_message(CLOG_ERROR, "Failed to change upload directory permissions: %s", strerror(errno));
-        pthread_mutex_unlock(&dir_mutex);
-        return -1;
-    }
-    
-    if (chmod(REPORT_DIR, S_IRUSR | S_IRGRP | S_IROTH) != 0) {
-        log_message(CLOG_ERROR, "Failed to change report directory permissions: %s", strerror(errno));
-        chmod(UPLOAD_DIR, UPLOAD_DIR_PERMS); // Restore upload directory permissions
-        pthread_mutex_unlock(&dir_mutex);
-        return -1;
-    }
-    
-    log_message(CLOG_INFO, "Directories locked for backup/transfer");
+
+    log_message(CLOG_INFO, "Directories locked for backup/transfer.");
     return 0;
 }
 
-/* Unlock directories after backup/transfer operations */
+
+// Locking directories before backup/transfer operations to prevent modifications
 int unlock_directories() {
-    // Ensure /var/reports/ allows access to subdirectories (read & execute, but no modification)
+    // Ensure /var/reports/ allows access to subdirectories
     if (chmod("/var/reports", S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) != 0) {
         log_message(CLOG_ERROR, "Failed to set /var/reports permissions: %s", strerror(errno));
         return -1;
     }
 
-    // Restore upload directory to be writable (Owner: Read, Write, Execute | Group: Read, Write, Execute | Others: Read)
-    if (chmod(UPLOAD_DIR, S_IRWXU | S_IRWXG | S_IROTH) != 0) {
+    // 🔹 Fully writable upload directory (everyone has full access)
+    if (chmod(UPLOAD_DIR, 0777) != 0) {
         log_message(CLOG_ERROR, "Failed to restore upload directory permissions: %s", strerror(errno));
         return -1;
     }
 
-    // Ensure dashboard directory is read-only (Users can enter but cannot modify files)
-    if (chmod(REPORT_DIR, S_IRUSR | S_IXUSR | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH) != 0) {
+    // 🔹 Ensure all files in upload directory are writable by all
+    system("chmod -R 777 /var/reports/upload/*.xml");
+
+    // 🔹 Dashboard directory: Read-only for non-root users
+    if (chmod(REPORT_DIR, 0755) != 0) {
         log_message(CLOG_ERROR, "Failed to set dashboard directory as read-only: %s", strerror(errno));
         return -1;
     }
 
-    // Ensure all files in dashboard are read-only (644)
+    // 🔹 Ensure all files in dashboard are readable, but NOT writable by non-root users
     system("chmod -R 644 /var/reports/dashboard/*.xml");
 
     // Unlock directory mutex
@@ -232,10 +242,7 @@ int unlock_directories() {
     return 0;
 }
 
-
-
-
-/* Transfer XML reports from upload to report directory */
+// Transfer XML reports from upload to report directory
 void transfer_reports() {
     pid_t pid;
     int status;
@@ -272,8 +279,9 @@ void transfer_reports() {
         dup2(pipe_fd[1], STDOUT_FILENO);
         close(pipe_fd[1]);
         
-        // Execute the transfer operation
-        execl("/bin/sh", "sh", "-c", "find " UPLOAD_DIR " -name \"*.xml\" -exec cp {} " REPORT_DIR " \\; -exec echo \"Transferred: {}\" \\;", NULL);
+        // Executing the transfer operation and delete the file from upload after
+        execl("/bin/sh", "sh", "-c", "find " UPLOAD_DIR " -name \"*.xml\" -exec cp {} " REPORT_DIR " \\; -exec echo \"Transferred: {}\" \\; -exec rm {} \\;", NULL);
+
         
         // If execl fails
         log_message(CLOG_ERROR, "Failed to execute transfer command: %s", strerror(errno));
@@ -290,7 +298,7 @@ void transfer_reports() {
         
         close(pipe_fd[0]);
         
-        // Wait for child to complete
+        // Waiting for child to complete
         waitpid(pid, &status, 0);
         
         if (WIFEXITED(status)) {
@@ -303,12 +311,12 @@ void transfer_reports() {
             log_message(CLOG_ERROR, "Transfer process terminated abnormally");
         }
         
-        // Unlock directories after transfer
+        // Unlocking directories after transfer
         unlock_directories();
     }
 }
 
-/* Backup report directory */
+// Backup report directory
 void backup_reports() {
     pid_t pid;
     int status;
@@ -320,23 +328,23 @@ void backup_reports() {
     time_t now = time(NULL);
     struct tm *time_info = localtime(&now);
     
-    // Create timestamp for backup directory
+    // Creating timestamp for backup directory
     strftime(timestamp, sizeof(timestamp), "%Y%m%d_%H%M%S", time_info);
     snprintf(backup_dir, PATH_MAX, "%s/%s", BACKUP_DIR, timestamp);
     
-    // Create backup directory
+    // Creating backup directory
     if (mkdir(backup_dir, 0755) != 0) {
         log_message(CLOG_ERROR, "Failed to create backup directory %s: %s", backup_dir, strerror(errno));
         return;
     }
     
-    // Create a pipe for IPC
+    // Creating a pipe for IPC
     if (pipe(pipe_fd) == -1) {
         log_message(CLOG_ERROR, "Failed to create pipe: %s", strerror(errno));
         return;
     }
     
-    // Lock directories before backup
+    // Locking directories before backup
     if (lock_directories() != 0) {
         close(pipe_fd[0]);
         close(pipe_fd[1]);
@@ -355,11 +363,11 @@ void backup_reports() {
         // Child process
         close(pipe_fd[0]); // Close read end
         
-        // Redirect stdout to pipe
+        // Redirecting stdout to pipe
         dup2(pipe_fd[1], STDOUT_FILENO);
         close(pipe_fd[1]);
         
-        // Execute the backup operation
+        // Executing the backup operation
         char command[PATH_MAX];
         snprintf(command, sizeof(command), "cp -r %s/*.xml %s/ 2>> /var/log/report_daemon/report_daemon.log", REPORT_DIR, backup_dir);
         execl("/bin/sh", "sh", "-c", command, (char *) NULL);
@@ -371,7 +379,7 @@ void backup_reports() {
         // Parent process
         close(pipe_fd[1]); // Close write end
         
-        // Read output from child process
+        // Reading output from child process
         while ((bytes_read = read(pipe_fd[0], buffer, BUFFER_SIZE - 1)) > 0) {
             buffer[bytes_read] = '\0';
             log_message(CLOG_INFO, "%s", buffer);
@@ -379,7 +387,7 @@ void backup_reports() {
         
         close(pipe_fd[0]);
         
-        // Wait for child to complete
+        // Waiting for child to complete
         waitpid(pid, &status, 0);
         
         if (WIFEXITED(status)) {
@@ -397,117 +405,111 @@ void backup_reports() {
     }
 }
 
-/* Initialize and start the daemon */
+// Initializing and starting the daemon
 int start_daemon(const char *pid_file) {
     pid_t pid, sid;
-    
-    // Check if daemon is already running
+
+    // Checking if daemon is already running
     if (check_daemon_running(pid_file)) {
         return -1;
     }
-    
-    // Fork off the parent process
+
+    // Forking off the parent process
     pid = fork();
     if (pid < 0) {
         log_message(CLOG_ERROR, "Failed to fork daemon: %s", strerror(errno));
         return -1;
     }
-    
-    // Exit the parent process
+
+    // Exiting the parent process
     if (pid > 0) {
         exit(EXIT_SUCCESS);
     }
-    
-    // Create a new SID for the child process
+
+    // Creating a new SID for the child process
     sid = setsid();
     if (sid < 0) {
         log_message(CLOG_ERROR, "Failed to create new session: %s", strerror(errno));
         return -1;
     }
-    
-    // Change the current working directory
+
+    // Changing the current working directory
     if (chdir("/") < 0) {
         log_message(CLOG_ERROR, "Failed to change directory: %s", strerror(errno));
         return -1;
     }
-    
-    // Close standard file descriptors
+
+    // Closing standard file descriptors
     close(STDIN_FILENO);
     close(STDOUT_FILENO);
     close(STDERR_FILENO);
-    
-    // Redirect standard file descriptors to /dev/null
+
+    // Redirecting standard file descriptors to /dev/null
     int fd = open("/dev/null", O_RDWR);
     if (fd < 0) {
         log_message(CLOG_ERROR, "Failed to open /dev/null: %s", strerror(errno));
         return -1;
     }
-    
+
     dup2(fd, STDIN_FILENO);
     dup2(fd, STDOUT_FILENO);
     dup2(fd, STDERR_FILENO);
-    
+
     if (fd > STDERR_FILENO) {
         close(fd);
     }
-    
-    // Set up signal handlers
+
+    // Setting up the signal handlers
     signal(SIGTERM, handle_signal);
     signal(SIGINT, handle_signal);
     signal(SIGUSR1, handle_signal);
-    
+
     // Write PID file
     if (write_pid_file(pid_file) != 0) {
         return -1;
     }
-    
+
     // Initialize logging
     init_logging();
-    
+
     log_message(CLOG_INFO, "Daemon started successfully");
-    
-    // Create directories if they don't exist
+
+    // Ensure directories exist
     if (create_directory_if_not_exists(UPLOAD_DIR) != 0 ||
         create_directory_if_not_exists(REPORT_DIR) != 0 ||
         create_directory_if_not_exists(BACKUP_DIR) != 0) {
         log_message(CLOG_ERROR, "Failed to create required directories");
         return -1;
     }
-    
-    // Set directory permissions
-    if (chmod(UPLOAD_DIR, UPLOAD_DIR_PERMS) != 0 ||
-        chmod(REPORT_DIR, REPORT_DIR_PERMS) != 0) {
-        log_message(CLOG_ERROR, "Failed to set directory permissions");
-        return -1;
+
+    // 🔹 Ensure correct permissions at startup
+    if (chmod(UPLOAD_DIR, 0777) != 0) { // Fully open for all users
+        log_message(CLOG_ERROR, "Failed to set upload directory permissions at startup: %s", strerror(errno));
     }
-    
+
+    if (chmod(REPORT_DIR, 0755) != 0) { // Readable by all, modifiable only by root
+        log_message(CLOG_ERROR, "Failed to set dashboard directory permissions at startup: %s", strerror(errno));
+    }
+
     return 0;
 }
 
-/* Run the daemon main loop */
+
+// Running the daemon in the main loop
 void run_daemon() {
     time_t last_check_time = 0;
     time_t now;
     struct tm *time_info;
-    int is_transfer_time = 0;
+    int last_backup_day = -1;  // Track the last day a backup was performed
     
     // Main daemon loop
     while (running) {
         now = time(NULL);
         time_info = localtime(&now);
-        
-        // Check if it's 1AM (transfer time)
-        is_transfer_time = (time_info->tm_hour == 1 && time_info->tm_min == 0 && time_info->tm_sec < CHECK_INTERVAL);
-        
-        // Check for manual backup signal
-        if (force_backup) {
-            log_message(CLOG_INFO, "Manual backup and transfer requested");
-            backup_reports();
-            transfer_reports();
-            force_backup = 0;
-        }
-        // Check for scheduled backup/transfer time
-        else if (is_transfer_time) {
+
+        // Check if it's exactly 1:00 AM and hasn't run today
+        if (time_info->tm_hour == 1 && time_info->tm_min == 0 && time_info->tm_mday != last_backup_day) {
+            last_backup_day = time_info->tm_mday;  // Mark backup as done for today
             log_message(CLOG_INFO, "Scheduled backup and transfer at 1AM");
             
             // Check for missing reports
@@ -517,21 +519,29 @@ void run_daemon() {
             backup_reports();
             transfer_reports();
         }
-        
+
+        // Check for manual backup signal
+        if (force_backup) {
+            log_message(CLOG_INFO, "Manual backup and transfer requested");
+            backup_reports();
+            transfer_reports();
+            force_backup = 0;
+        }
+
         // Regular check for file changes
         if (now - last_check_time >= CHECK_INTERVAL) {
             check_uploads();
             last_check_time = now;
         }
-        
+
         // Sleep to reduce CPU usage
         sleep(1);
     }
-    
+
     log_message(CLOG_INFO, "Daemon shutting down");
 }
 
-/* Stop the daemon */
+// Stopping the daemon
 void stop_daemon(const char *pid_file) {
     FILE *fp;
     pid_t pid;

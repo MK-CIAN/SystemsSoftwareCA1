@@ -50,7 +50,7 @@ start() {
     
     echo "Starting $NAME..."
     
-    # Create log directory if it doesn't exist
+    # Creating log directory if it doesn't exist
     mkdir -p "$(dirname "$LOGFILE")"
     
     # Start the daemon

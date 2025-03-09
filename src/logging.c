@@ -17,9 +17,9 @@
 static FILE *log_fp = NULL;
 static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-/* Initialize logging */
+// Initialize logging
 int init_logging() {
-    // Create log directory if it doesn't exist
+    // Creating the log directory if it doesn't exist
     struct stat st;
     if (stat(LOG_DIR, &st) != 0) {
         if (mkdir(LOG_DIR, 0755) != 0) {
@@ -41,7 +41,7 @@ int init_logging() {
     return 0;
 }
 
-/* Clean up logging */
+// Cleaning up logging
 void cleanup_logging() {
     if (log_fp != NULL) {
         fclose(log_fp);
@@ -49,7 +49,7 @@ void cleanup_logging() {
     }
 }
 
-/* Get log level string */
+// Geting log level string
 const char *get_log_level_str(int level) {
     switch (level) {
         case CLOG_DEBUG:
@@ -67,7 +67,7 @@ const char *get_log_level_str(int level) {
     }
 }
 
-/* Log a message */
+// Logging a message
 void log_message(int level, const char *format, ...) {
     va_list args;
     time_t now;
@@ -110,7 +110,7 @@ void log_message(int level, const char *format, ...) {
     pthread_mutex_unlock(&log_mutex);
 }
 
-/* Log a system error */
+// Logging a system error
 void log_system_error(const char *message) {
     log_message(CLOG_ERROR, "%s: %s", message, strerror(errno));
 }

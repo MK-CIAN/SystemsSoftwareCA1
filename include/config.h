@@ -17,7 +17,7 @@
 
 /* Log file */
 #define LOG_FILE LOG_DIR "/report_daemon.log"
-#define CHANGE_LOG_FILE UPLOAD_DIR "/changes.log"
+#define CHANGE_LOG_FILE LOG_DIR "/changes.log"
 
 /* Log levels */
 #undef LOG_DEBUG
@@ -42,4 +42,4 @@
 /* Buffer size for IPC */
 #define BUFFER_SIZE 4096
 
-#endif /* CONFIG_H */
+#endif

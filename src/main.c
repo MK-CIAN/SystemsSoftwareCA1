@@ -34,23 +34,23 @@ int main(int argc, char *argv[]) {
     
     // Process commands
     if (strcmp(argv[1], "start") == 0) {
-        // Start daemon
+        // Starting daemon
         log_message(CLOG_INFO, "Starting daemon...");
         if (start_daemon(PID_FILE) != 0) {
             log_message(CLOG_ERROR, "Failed to start daemon");
             return EXIT_FAILURE;
         }
         
-        // Run daemon main loop
+        // Running daemon main loop
         run_daemon();
         
     } else if (strcmp(argv[1], "stop") == 0) {
-        // Stop daemon
+        // Stopping daemon
         log_message(CLOG_INFO, "Stopping daemon...");
         stop_daemon(PID_FILE);
         
     } else if (strcmp(argv[1], "status") == 0) {
-        // Check daemon status
+        // Checking daemon status
         if (check_daemon_running(PID_FILE)) {
             printf("Daemon is running\n");
         } else {
@@ -58,7 +58,7 @@ int main(int argc, char *argv[]) {
         }
         
     } else if (strcmp(argv[1], "backup") == 0) {
-        // Signal daemon to perform backup
+        // Signaling daemon to perform backup
         FILE *fp;
         pid_t pid;
         
@@ -87,7 +87,7 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
     
-    // Clean up logging
+    // Cleaning up logging
     cleanup_logging();
     
     return EXIT_SUCCESS;

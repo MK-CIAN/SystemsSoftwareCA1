@@ -19,7 +19,7 @@
 #define DT_REG 8  // Value for regular files
 #endif
 
-/* Create directory if it doesn't exist */
+// Creating the directory if it doesn't exist
 int create_directory_if_not_exists(const char *path) {
     struct stat st;
     
@@ -41,7 +41,7 @@ int create_directory_if_not_exists(const char *path) {
     return 0;
 }
 
-/* Get username from UID */
+// Getting the username from UID
 char *get_username_from_uid(uid_t uid) {
     struct passwd *pwd;
     char *username;
@@ -57,7 +57,7 @@ char *get_username_from_uid(uid_t uid) {
     return username;
 }
 
-/* Get formatted time string from timestamp */
+// Getting the formatted time string from timestamp
 char *get_time_string(time_t timestamp) {
     char *time_str = malloc(64);
     struct tm *time_info;
@@ -68,21 +68,43 @@ char *get_time_string(time_t timestamp) {
     return time_str;
 }
 
-/* Log file change to the change log file */
+// Logging the file change to the change log file
 void log_file_change(const char *filename, const char *username, const char *timestamp) {
     FILE *fp;
-    
+
+    // Making sure the /var/log/report_daemon/ directory exists
+    struct stat st;
+    if (stat(LOG_DIR, &st) != 0) {
+        if (mkdir(LOG_DIR, 0755) != 0) {
+            log_message(CLOG_ERROR, "Failed to create log directory: %s", strerror(errno));
+            return;
+        }
+    }
+
+    // Ensure changes.log exists in LOG_DIR
+    if (access(CHANGE_LOG_FILE, F_OK) != 0) {
+        fp = fopen(CHANGE_LOG_FILE, "w");
+        if (fp != NULL) {
+            fprintf(fp, "File,User,Timestamp\n"); // CSV-style header
+            fclose(fp);
+        }
+        // Set read-only permissions for log file
+        chmod(CHANGE_LOG_FILE, S_IRUSR | S_IRGRP | S_IROTH);
+    }
+
+    // Open the file for appending logs
     fp = fopen(CHANGE_LOG_FILE, "a");
     if (fp == NULL) {
         log_message(CLOG_ERROR, "Failed to open change log file: %s", strerror(errno));
         return;
     }
-    
+
     fprintf(fp, "%s,%s,%s\n", filename, username, timestamp);
     fclose(fp);
 }
 
-/* Count files in directory matching pattern */
+
+// Counting the files in directory matching pattern
 int count_files_in_dir(const char *dir_path, const char *pattern) {
     DIR *dir;
     struct dirent *entry;
