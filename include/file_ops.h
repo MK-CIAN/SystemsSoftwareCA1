@@ -20,4 +20,21 @@ void log_file_change(const char *filename, const char *username, const char *tim
 /* Count files in directory matching pattern */
 int count_files_in_dir(const char *dir_path, const char *pattern);
 
+void check_uploads();
+
+/* Check for missing reports from departments */
+void check_missing_reports();
+
+/* Lock directories before backup/transfer operations */
+int lock_directories();
+
+/* Unlock directories after backup/transfer operations */
+int unlock_directories();
+
+/* Transfer XML reports from upload to report directory */
+void transfer_reports();
+
+/* Backup report directory */
+void backup_reports();
+
 #endif /* FILE_OPS_H */
